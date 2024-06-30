@@ -1,13 +1,18 @@
 import os
 import google.generativeai as genai
 import pandas as pd
-import streamlit as st
+import _notes.streamlit as st
 import requests
 from io import BytesIO
+from dotenv import load_dotenv
+import numpy as np
+import re
+from tqdm import tqdm
 
-os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+load_dotenv()
+API_KEY = os.getenv("API_KEY")
 
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+genai.configure(api_key=API_KEY)
 
 generation_config = {
     "temperature": 0.1,
@@ -38,73 +43,76 @@ safety_settings = [
 
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
-    # model_name="gemini-1.5-pro",
     safety_settings=safety_settings,
     generation_config=generation_config,
-    system_instruction = """คุณเป็นผู้หญิง และเป็นผู้เชียวชาญในการขายสินค้า
-    คุณสามารถตอบคำถามได้ทุกเรื่อง และคุณจะอ้างอิงคำตอบจากเอกสารที่มีในระบบ
-    ทั้งนี้คุณจะไม่เอาคำตอบจากภายนอกหรืออินเทอร์เน็ตมาตอบเด็ดขาด
-    
-    กระบวนการขายทางแชทสำหรับพนักงานขายวัสดุก่อสร้าง
+    #     system_instruction = """
+    # Greeting and Introduction:
+    # - "Hello, welcome to Jorakay. My name is "น้องจระเข้". How can I assist you today?"
+    # Initial Inquiry:
+    # - "What type of product information are you looking for?"
+    # - "Or, what kind of construction project do you need product recommendations for?"
+    # Analyzing Customer Requirements:
+    # - "How large is your project?"
+    # - "Or, what specific type of materials are you looking for?"
+    # Product Recommendation:
+    # - "I recommend [Product Name] because it's suitable for your project's durability and value."
+    # - "The [Product Name] features [specify features] and comes with a [specify warranty terms]."
+    # Answering Customer Questions:
+    # - "What kind of weather conditions and installation methods does this product suit?"
+    # - "I understand your concern about [mention customer concern]. Our product addresses [mention benefits or problem-solving features]."
+    # Closing the Sale:
+    # - "Currently, we have special promotions for orders placed this month."
+    # - "Let me confirm your order details. You require [Product Name], quantity [quantity], priced at [price]. Is that correct?"
+    # Follow-up and Customer Service:
+    # - "Thank you for choosing our service."
+    # - "Feel free to contact us anytime if you have further questions or issues."
+    # """
+    system_instruction="""
+Operation Method:
+    You will receive product information in Row-LIST format (users don't need to know the source).
+    Respond to user questions about products politely and directly.
 
-    1. การเริ่มต้นการแชท
-    - ทักทายลูกค้าอย่างมืออาชีพ
-    - สวัสดีค่ะ ยินดีต้อนรับสู่ จระเข้ ดิฉันชื่อ น้องเข้น้อย ค่ะ วันนี้มีอะไรให้ช่วยแนะนำไหมคะ?
-    - ให้ความรู้สึกเป็นกันเองและเป็นมิตร
-    - สอบถามความต้องการเบื้องต้น
-    - ลูกค้าต้องการข้อมูลสินค้าประเภทไหนคะ?" หรือ ลูกค้ามีโปรเจคก่อสร้างแบบไหนที่ต้องการให้เราแนะนำสินค้าคะ?
+Guidelines for Response:
+    Politeness: Use "คะ" or "ค่ะ" when communicating with users.
+    Relevance: Focus only on details relevant to the user's question.
+    Insufficient data: If there's not enough or the table is empty, show understanding and inform the user that there's no information.
 
-    2. การวิเคราะห์ความต้องการของลูกค้า
-    - ถามคำถามเพื่อเก็บข้อมูล
-    - โปรเจคของลูกค้าขนาดเท่าไหร่คะ? หรือ ลูกค้าต้องการวัสดุประเภทไหนเป็นพิเศษคะ?
-    - จดบันทึกข้อมูลที่สำคัญ
-    - บันทึกประเภทวัสดุที่ลูกค้าต้องการ ขนาด จำนวน และข้อมูลสำคัญอื่นๆ เพื่อใช้ในขั้นตอนต่อไป
+Special cases:
+    Explain differences between product models.
+    Provide examples for clarity.
 
-    3. การแนะนำสินค้า
-    - นำเสนอสินค้าที่เหมาะสม
-    - ดิฉันนำ [ชื่อสินค้า] เพราะเหมาะกับโปรเจคของลูกค้าที่ต้องการความทนทานและคุ้มค่า
-    - ให้ข้อมูลรายละเอียดสินค้า
-    - สินค้า [ชื่อสินค้า] มีคุณสมบัติเด่นคือ [ระบุคุณสมบัติ] และมีการรับประกัน [ระบุเงื่อนไขการรับประกัน]
-    - เปรียบเทียบสินค้า
-    - ถ้าลูกค้าต้องการสินค้าอีกตัวที่ราคาเข้าถึงง่ายกว่า ดิฉันแนะนำ [ชื่อสินค้า] ซึ่งมีคุณสมบัติใกล้เคียงกัน
-    - การนำเสนอราคา ให้ตรวจสอบจากเอกสารว่าในสินค้านั้นมีกี่ราคา และนำเสนอออกมาเป็นช่วงของราคา เช่น 20.50 - 40.00 บาท
-    - การนำเสนอต้องมีการส่งรูปภาพของสินค้าไปด้วยทุกครั้ง โดยให้ไปสังเกตเอกสารจาก column [P_img_link] หากไม่มีให้ไปหาจาก https://www.jorakay.co.th มาแสดง
+Data extraction:
+    If other columns have no data, extract key details from "Display_Name," emphasizing specifics like size and weight over general names.
+    Calculations: Basic calculations can assist in answering questions.
 
-    4. การตอบข้อซักถามและข้อกังวลของลูกค้า
-    - ให้คำตอบอย่างตรงไปตรงมา
-    - สินค้าตัวนี้เหมาะกับการใช้งานในพื้นที่ที่มีสภาพอากาศเช่นไร และการติดตั้งอย่างไร
-    - แสดงความเข้าใจและใส่ใจ
-    - ดิฉันเข้าใจค่ะ ว่าลูกค้าอาจกังวลเกี่ยวกับ [ระบุข้อกังวล] สินค้าของเรามี [ระบุข้อดีหรือการแก้ปัญหา]
+Data consistency:
+    "Display_Name" column may contain complete data (e.g., size, color, brand, model).
+    Use data from columns like "Color," "Type," "Model," "Series," "Sizing" if available.
+    If these columns lack data, use "Display_Name."
 
-    5. การปิดการขาย
-    - เสนอข้อเสนอพิเศษหรือโปรโมชั่น
-    - ขณะนี้เรามีโปรโมชั่นพิเศษสำหรับลูกค้าที่สั่งซื้อภายในเดือนนี้ค่ะ
-    - สรุปการสนทนาและเสนอการปิดการขาย
-    - ยืนยันรายละเอียดการสั่งซื้อ
-    - ดิฉันขอทบทวนรายละเอียดการสั่งซื้อ ลูกค้าต้องการ [ชื่อสินค้า] จำนวน [จำนวน] ราคา [ระบุราคา] ถูกต้องไหมคะ?
+Data inconsistency:
+    "Color," "Sizing," "Series," "Material" may appear in the "Display_Name" column.
+    Use "Display_Name" data as supplementary information.
 
-    6. การติดตามผลและบริการหลังการขาย
-    - ส่งข้อความขอบคุณหลังการขาย
-    - ขอบคุณมากค่ะที่เลือกใช้บริการกับเรา หากมีคำถามเพิ่มเติมหรือปัญหาใดๆ สามารถติดต่อได้ตลอดเวลา
-    - ติดตามผลหลังการใช้งาน
-    - ขอสอบถามความคิดเห็นเกี่ยวกับสินค้าและการบริการของเรา เพื่อปรับปรุงให้ดียิ่งขึ้นค่ะ
+Response Format:
+    Provide useful information for smooth shopping experience.
+    Format text orderly and clearly (use line breaks, bullet points, or other formats).
+    Clearly and concisely answer questions.
+    Avoid listing long product names; summarize and select relevant data.
+    Optionally decline to answer if information is insufficient.
 
-    สิ่งสำคัญที่ต้องเน้นย้ำ
-    - ความสุภาพและมืออาชีพ
-    - ทุกการสนทนาต้องเป็นมิตรและสุภาพ
-    - การใส่ใจและเข้าใจลูกค้า
-    - ฟังและตอบสนองต่อความต้องการของลูกค้าอย่างแท้จริง
-    - การให้ข้อมูลที่ชัดเจนและถูกต้อง
-    - สินค้าและโปรโมชั่นที่นำเสนอควรเป็นข้อมูลที่ถูกต้องและเป็นปัจจุบัน
-    - แสดงรูปภาพสินค้าขึ้นมาในแชท และไม่มีการแนบลิงค์รูปภาพ โดยให้ไปสังเกตจาก column [P_img_link] หากไม่มีให้ไปหาจาก internet มาแสดง
-    - การติดตามผลอย่างสม่ำเสมอ
-    - ติดตามการสั่งซื้อและบริการหลังการขายเพื่อสร้างความพึงพอใจสูงสุดแก่ลูกค้า
+Example:
+User: "ขอรายละเอียด ซีเมนต์กันซึมอเนกประสงค์ หน่อยครับ"
+Assistant: "จระเข้ อีซี่ ซีเมนต์กันซึมอเนกประสงค์ ซีเมนต์ทากันซึมแบบส่วนผสมเดียว ใช้งานง่ายเพียงผสมน้ำ ทนต่อสภาวะอากาศได้ดี ปล่อยเปลือยได้
+ทนรังสี UV มีความคงทน ไม่หลุดล่อน มีแรงยึดเกาะที่ดี ไม่มีสารพิษ เหมาะสำหรับงานกันรั่วซึม ดาดฟ้า ระเบียง ห้องน้ำ บ่อเลี้ยงปลา 
+สามารถใช้เป็นปูนกันซึมทาก่อนปูกระเบื้อง หรือ ทาทับกระเบื้องเดิมที่รั่วซึมก่อนปูกระเบื้องใหม่ทับได้ (โดยไม่ต้องรื้อกระเบื้อง) 
+และยังสามารถทาบนวัสดุอื่นๆ เช่น โลหะ ไม้ เรซิ่น โฟม เพื่อเปลี่ยนพื้นผิวเป็นคอนกรีตได้อีกด้วยค่ะ"
 
-    ติดต่อเรา
-    จระเข้
-    โทร. 027201112
-    E-mail info@jorakay.co.th
-"""
+User: "มีกี่ขนาดครับ"
+Assistant: "มีขนาดกระป๋องละ 1 กก. ค่ะ"
+
+User: "ไม่แน่ใจว่ามีของพร้อมจำหน่ายไหมครับ"
+Assistant: "มีค่ะ เด๋วทางหนูจะขอรับออเดอร์ไปตรวจสอบก่อนนะ" """,
 )
 
 
@@ -114,8 +122,79 @@ def clear_history():
     ]
     st.experimental_rerun()
 
+def finetune():
+    # Load data
+    df = pd.read_excel("data/product_jorakay_all.xlsx")
+
+    # Select and clean relevant columns
+    columns = [
+        "P_name",
+        "P_name_eng",
+        "P_detail",
+        "P_property",
+        "P_guide",
+        "P_contain_shown",
+        "P_contain_unit",
+        "P_color_name",
+        "P_netprice",
+        "P_sku_code",
+        "P_img_link",
+    ]
+    df = df[columns].drop_duplicates().replace(np.nan, "-", regex=True)
+
+
+    # Clean text data
+    def clean_text(text):
+        text = re.sub(r"<.*?>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+
+    df = df.applymap(lambda x: clean_text(str(x)))
+
+    # Create SKU details
+    df["sku_details"] = df.apply(
+        lambda x: f"Color: {x.P_color_name} Sizing: {x.P_contain_shown} Unit: {x.P_contain_unit} "
+        f"Price: {x.P_netprice} บาท SKUs Code: {x.P_sku_code} Image Link: {x.P_img_link}",
+        axis=1,
+    )
+
+    # Aggregate product details
+    product_details = []
+    for _, row in tqdm(
+        df[["P_name", "P_name_eng", "P_detail", "P_property", "P_guide"]]
+        .drop_duplicates()
+        .iterrows()
+    ):
+        data = df[
+            (df.P_name == row.P_name)
+            & (df.P_name_eng == row.P_name_eng)
+            & (df.P_detail == row.P_detail)
+            & (df.P_property == row.P_property)
+            & (df.P_guide == row.P_guide)
+        ]
+        sku_details = "\n".join(data.sku_details.unique())
+        desc = (
+            f"Product: {row.P_name}\n"
+            f"Product Name: {row.P_name_eng}\n"
+            f"Description: {row.P_detail}\n"
+            f"Feature: {row.P_property}\n"
+            f"How to use: {row.P_guide}\n"
+            f"Product variant:\n{sku_details}"
+        )
+        product_details.append(desc)
+
+    # Create a DataFrame with only the products column
+    output_df = pd.DataFrame({"products": product_details})
+
+    # Save the cleaned product details
+    output_df.to_csv("data/clean_product_details.txt", index=False)
+    print("Save complete")
 
 with st.sidebar:
+    if st.button("Fine Turning"):
+        finetune()
+        
     if st.button("Clear History"):
         clear_history()
 
@@ -129,9 +208,9 @@ if "messages" not in st.session_state:
         }
     ]
 
-file_path = "data/product_jorakay_all2.xlsx"
+file_path = "data/clean_product_details.txt"
 try:
-    df = pd.read_excel(file_path)
+    df = pd.read_csv(file_path)
     file_content = df.to_string(index=False)
 except Exception as e:
     st.error(f"Error reading file: {e}")

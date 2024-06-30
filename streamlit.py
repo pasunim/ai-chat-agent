@@ -10,9 +10,9 @@ import re
 from tqdm import tqdm
 
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
+os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 
-genai.configure(api_key=API_KEY)
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 generation_config = {
     "temperature": 0.1,

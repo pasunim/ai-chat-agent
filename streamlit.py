@@ -1,7 +1,7 @@
 import os
 import google.generativeai as genai
 import pandas as pd
-import _notes.streamlit as st
+import streamlit as st
 import requests
 from io import BytesIO
 from dotenv import load_dotenv

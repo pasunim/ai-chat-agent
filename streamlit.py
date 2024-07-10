@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import numpy as np
 import re
 from tqdm import tqdm
+import time
 
 load_dotenv()
 os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
